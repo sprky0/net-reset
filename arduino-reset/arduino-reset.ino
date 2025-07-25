@@ -10,7 +10,7 @@
 // =================================================================
 
 // MAC address for the Ethernet shield. This must be unique on your network.
-byte mac[] = { 0xAB, 0xAB, 0xAB, 0xAB, 0xAB, 0xAB };
+byte mac[] = { 0xAA, 0xBB, 0xCC, 0xBB, 0xAA, 0x01 };
 
 // Define a structure to hold our target server and path
 struct Target {
