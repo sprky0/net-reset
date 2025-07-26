@@ -31,15 +31,18 @@ const int numTargets = sizeof(targets) / sizeof(targets[0]);
 int       currentTargetIndex = 0; // Tracks which target to ping next
 
 // Digital output pins
-#define FAILURE_PIN 8  // This pin goes HIGH when connection is considered lost.
-#define RECOVERY_PIN 9 // This pin pulses HIGH when connection is restored.
+#define FAILURE_STATE_PIN   8  // This pin is HIGH whenever not in STATE_NORMAL (failure or cooldown).
+#define FAILURE_SIGNAL_PIN  9  // This pin goes HIGH for a timed duration when connection is considered lost.
+#define RECOVERY_SIGNAL_PIN 10 // This pin pulses HIGH when connection is restored.
+#define PINGING_PIN         11 // This pin pulses HIGH briefly when making a ping request.
 
 // Timing configuration (in milliseconds)
 #define PING_INTERVAL             30000  // How often to attempt a ping: 30 seconds.
 #define FAILURE_THRESHOLD         300000 // Mark as failed after 5 minutes of no successful pings.
-#define FAILURE_SIGNAL_DURATION   60000  // How long the failure pin stays HIGH: 1 minute.
+#define FAILURE_SIGNAL_DURATION   60000  // How long the failure signal pin stays HIGH: 1 minute.
 #define FAILURE_COOLDOWN_DURATION 300000 // How long to wait after failure before re-triggering.
 #define RECOVERY_PULSE_DURATION   5000   // Duration of the recovery signal pulse: 5 seconds.
+#define PINGING_PULSE_DURATION    1000   // Duration of the pinging signal pulse: 1 second.
 #define HTTP_TIMEOUT              10000  // Max time to wait for HTTP connection/response: 10 seconds.
 
 
@@ -53,7 +56,7 @@ EthernetClient client;
 // This enum defines the overall state of the connection monitor.
 enum SystemState {
 	STATE_NORMAL,         // Everything is fine, pinging periodically.
-	STATE_FAILED_SIGNAL,  // Connection lost, failure pin is HIGH.
+	STATE_FAILED_SIGNAL,  // Connection lost, failure signal pin is HIGH.
 	STATE_COOLDOWN        // Failure signal ended, actively checking for recovery.
 };
 SystemState currentState = STATE_NORMAL;
@@ -73,11 +76,13 @@ unsigned long lastSuccessfulConnectionTime = 0;
 unsigned long failureStateStartTime        = 0;
 unsigned long cooldownStateStartTime       = 0;
 unsigned long recoveryPulseStartTime       = 0;
+unsigned long pingingPulseStartTime        = 0;
 unsigned long pingStateStartTime           = 0; // Timer for the current ping sub-state (e.g., for timeouts)
 unsigned long pingTransactionStartTime     = 0; // Timer for the entire ping transaction duration
 
 // --- Flags ---
 bool recoveryPulseActive = false;
+bool pingingPulseActive  = false;
 
 // =================================================================
 // --- SETUP ---
@@ -85,10 +90,14 @@ bool recoveryPulseActive = false;
 
 void setup() {
 	// Initialize digital pins for output and set them low initially
-	pinMode(FAILURE_PIN, OUTPUT);
-	pinMode(RECOVERY_PIN, OUTPUT);
-	digitalWrite(FAILURE_PIN, LOW);
-	digitalWrite(RECOVERY_PIN, LOW);
+	pinMode(FAILURE_STATE_PIN, OUTPUT);
+	pinMode(FAILURE_SIGNAL_PIN, OUTPUT);
+	pinMode(RECOVERY_SIGNAL_PIN, OUTPUT);
+	pinMode(PINGING_PIN, OUTPUT);
+	digitalWrite(FAILURE_STATE_PIN, LOW);
+	digitalWrite(FAILURE_SIGNAL_PIN, LOW);
+	digitalWrite(RECOVERY_SIGNAL_PIN, LOW);
+	digitalWrite(PINGING_PIN, LOW);
 
 	// Open serial communications and wait for port to open
 	Serial.begin(9600);
@@ -136,6 +145,9 @@ void loop() {
 
 	// Task 4: Manage the recovery pin pulse timer.
 	manageRecoveryPulse();
+
+	// Task 5: Manage the pinging pin pulse timer.
+	managePingingPulse();
 }
 
 
@@ -156,10 +168,11 @@ void manageSystemState() {
 				// --- Transition to FAILED_SIGNAL state ---
 				currentState = STATE_FAILED_SIGNAL;
 				failureStateStartTime = now;
-				digitalWrite(FAILURE_PIN, HIGH);
+				digitalWrite(FAILURE_STATE_PIN, HIGH);
+				digitalWrite(FAILURE_SIGNAL_PIN, HIGH);
 				Serial.println(F("\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"));
 				Serial.println(F("!!      CONNECTION STATE: FAILED      !!"));
-				Serial.print(F("!! Failure pin HIGH for "));
+				Serial.print(F("!! Failure signal pin HIGH for "));
 				Serial.print(FAILURE_SIGNAL_DURATION / 1000);
 				Serial.println(F(" seconds."));
 				Serial.println(F("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"));
@@ -172,7 +185,8 @@ void manageSystemState() {
 				// --- Transition to COOLDOWN state ---
 				currentState = STATE_COOLDOWN;
 				cooldownStateStartTime = now;
-				digitalWrite(FAILURE_PIN, LOW);
+				digitalWrite(FAILURE_SIGNAL_PIN, LOW);
+				// Note: FAILURE_STATE_PIN remains HIGH during cooldown
 				Serial.println(F("\n----------------------------------------"));
 				Serial.println(F("-> Failure signal finished."));
 				Serial.print(F("-> Entering COOLDOWN. Actively checking for recovery for "));
@@ -187,6 +201,7 @@ void manageSystemState() {
 			if (now - cooldownStateStartTime >= FAILURE_COOLDOWN_DURATION) {
 				// --- Transition back to NORMAL state to re-evaluate ---
 				currentState = STATE_NORMAL;
+				digitalWrite(FAILURE_STATE_PIN, LOW);
 				// The last successful connection time is still old, so the system
 				// will likely re-enter the FAILED state on the next loop, which is correct.
 				Serial.println(F("\n****************************************"));
@@ -213,6 +228,11 @@ void managePingProcess() {
 				Serial.print(F("Pinging http://"));
 				Serial.print(currentTarget.server);
 				Serial.println(currentTarget.path);
+
+				// Start the pinging signal pulse
+				pingingPulseActive = true;
+				digitalWrite(PINGING_PIN, HIGH);
+				pingingPulseStartTime = now;
 
 				// --- Transition to CONNECTING state ---
 				pingState = PING_CONNECTING;
@@ -301,8 +321,18 @@ void managePingProcess() {
 void manageRecoveryPulse() {
 	if (recoveryPulseActive && (millis() - recoveryPulseStartTime >= RECOVERY_PULSE_DURATION)) {
 		recoveryPulseActive = false;
-		digitalWrite(RECOVERY_PIN, LOW);
+		digitalWrite(RECOVERY_SIGNAL_PIN, LOW);
 		Serial.println(F("-> Recovery pulse finished."));
+	}
+}
+
+/**
+ * @brief Manages the timer for the pinging pulse signal.
+ */
+void managePingingPulse() {
+	if (pingingPulseActive && (millis() - pingingPulseStartTime >= PINGING_PULSE_DURATION)) {
+		pingingPulseActive = false;
+		digitalWrite(PINGING_PIN, LOW);
 	}
 }
 
@@ -330,7 +360,8 @@ void handleSuccess(unsigned long duration) {
 
 		// --- RECOVERY: Reset all state flags back to normal ---
 		currentState = STATE_NORMAL;
-		digitalWrite(FAILURE_PIN, LOW); // Ensure failure pin is off
+		digitalWrite(FAILURE_STATE_PIN, LOW);  // Turn off failure state indicator
+		digitalWrite(FAILURE_SIGNAL_PIN, LOW); // Ensure failure signal pin is off
 
 		Serial.println(F("\n****************************************"));
 		Serial.println(F("** CONNECTION STATE: RECOVERED     **"));
@@ -341,7 +372,7 @@ void handleSuccess(unsigned long duration) {
 
 		// Activate the recovery signal pulse
 		recoveryPulseActive = true;
-		digitalWrite(RECOVERY_PIN, HIGH);
+		digitalWrite(RECOVERY_SIGNAL_PIN, HIGH);
 		recoveryPulseStartTime = now;
 		Serial.print(F("-> Starting recovery pulse for "));
 		Serial.print(RECOVERY_PULSE_DURATION / 1000);
