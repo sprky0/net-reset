@@ -73,7 +73,8 @@ unsigned long lastSuccessfulConnectionTime = 0;
 unsigned long failureStateStartTime        = 0;
 unsigned long cooldownStateStartTime       = 0;
 unsigned long recoveryPulseStartTime       = 0;
-unsigned long pingStateStartTime           = 0; // Timer for the current ping state (e.g., for timeouts)
+unsigned long pingStateStartTime           = 0; // Timer for the current ping sub-state (e.g., for timeouts)
+unsigned long pingTransactionStartTime     = 0; // Timer for the entire ping transaction duration
 
 // --- Flags ---
 bool recoveryPulseActive = false;
@@ -215,7 +216,8 @@ void managePingProcess() {
 
         // --- Transition to CONNECTING state ---
         pingState = PING_CONNECTING;
-        pingStateStartTime = now; // Start the timer for this attempt.
+        pingStateStartTime = now; // Start the timer for this sub-state.
+        pingTransactionStartTime = now; // Start the timer for the whole transaction.
       }
       break;
 
@@ -263,7 +265,8 @@ void managePingProcess() {
         // A 2xx or 3xx response indicates a working connection.
         // We check for "HTTP/1.1 2" or "HTTP/1.1 3". This is robust.
         if (strstr(statusLine, "HTTP/1.1 2") != NULL || strstr(statusLine, "HTTP/1.1 3") != NULL) {
-          handleSuccess(now - (pingStateStartTime - (pingStateStartTime - cooldownStateStartTime))); // Pass total request time
+          // Calculate duration from the start of the entire transaction.
+          handleSuccess(now - pingTransactionStartTime);
         } else {
           Serial.println(F("-> Failure: Received a non-2xx/3xx status code."));
         }
