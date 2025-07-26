@@ -14,4 +14,9 @@ Here is a recommended arrangement:
 
 ## Process
 
-Defaults to checking several sites, these are configurable.  Random MAC address, not critical but must be unique on the local network.
+Defaults to checking several sites in rotation, these are easily configurable by modifying the source.  Self assigns a random MAC address, which is not critical, but must be unique on the local network.
+
+
+## Details
+
+There is a detailed writeup on [functionality here](docs/README_MORE.md)
