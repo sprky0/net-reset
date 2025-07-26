@@ -351,17 +351,16 @@ void handleSuccess(unsigned long duration) {
 
 	// A successful ping always updates the last success time.
 	unsigned long now = millis();
-	lastSuccessfulConnectionTime = now;
-
+	
 	// If this success happened while we were in a failure/cooldown cycle, it's a recovery.
 	if (currentState == STATE_FAILED_SIGNAL || currentState == STATE_COOLDOWN) {
-		// Calculate outage duration from the moment the failure process began.
-		unsigned long outageDuration = now - failureStateStartTime;
+		// Calculate actual outage duration from last successful connection
+		unsigned long outageDuration = now - lastSuccessfulConnectionTime;
 
 		// --- RECOVERY: Reset all state flags back to normal ---
 		currentState = STATE_NORMAL;
-		digitalWrite(FAILURE_STATE_PIN, LOW);  // Turn off failure state indicator
-		digitalWrite(FAILURE_SIGNAL_PIN, LOW); // Ensure failure signal pin is off
+		digitalWrite(FAILURE_STATE_PIN, LOW);
+		digitalWrite(FAILURE_SIGNAL_PIN, LOW);
 
 		Serial.println(F("\n****************************************"));
 		Serial.println(F("** CONNECTION STATE: RECOVERED     **"));
@@ -378,4 +377,7 @@ void handleSuccess(unsigned long duration) {
 		Serial.print(RECOVERY_PULSE_DURATION / 1000);
 		Serial.println(F(" seconds."));
 	}
+	
+	// Update last success time AFTER calculating outage duration
+	lastSuccessfulConnectionTime = now;
 }
