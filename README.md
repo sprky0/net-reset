@@ -129,7 +129,7 @@ The system uses DHCP for automatic network configuration. The MAC address is pre
 ## Installation
 
 1. Connect Arduino Ethernet shield to your Arduino Uno/Mega
-2. Wire the four output pins to your control relays and indicator LEDs as needed
+2. Wire the four output pins to your control relays and indicator relays or LEDs as needed
 3. Connect Ethernet cable from shield to your network switch/router
 4. Upload the sketch to your Arduino
 5. Connect power and monitor via Serial console for status
@@ -148,6 +148,3 @@ Connect to the Arduino's serial port at 9600 baud to see detailed operational lo
 - Failure and recovery events
 - Timing information for all operations
 
-## Details
-
-For more technical details about the implementation, see the comprehensive code comments and state machine documentation within the source code.
