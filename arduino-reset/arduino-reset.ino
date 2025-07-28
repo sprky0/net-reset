@@ -109,11 +109,9 @@ void setup() {
 
 	// Start the Ethernet connection, retrying if it fails.
 	Serial.println(F("Initializing Ethernet with DHCP..."));
-	if (Ethernet.begin(mac) == 0) {
-		Serial.println(F("FATAL: Failed to configure Ethernet using DHCP."));
-		// If DHCP fails, we can't do anything. The program will hang here.
-		// Consider adding a fallback to a static IP if this is a concern.
-		while (true) { delay(1000); }
+	while (Ethernet.begin(mac) == 0) {
+		Serial.println(F("Failed to configure Ethernet using DHCP.  Will retry in 5 seconds."));
+		delay(5000);
 	}
 
 	// Print the local IP address obtained from DHCP
