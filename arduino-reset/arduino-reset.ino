@@ -22,10 +22,36 @@ struct Target {
 
 // Array of targets to ping. Add or remove targets as needed.
 const Target targets[] = {
-	{ "www.google.com",    "/" },
-	{ "www.amazon.com",    "/" },
-	{ "www.microsoft.com", "/" },
-	{ "www.cloudflare.com","/" }
+	{ "www.google.com",       "/" },
+	{ "www.amazon.com",       "/" },
+	{ "www.microsoft.com",    "/" },
+	{ "www.cloudflare.com",   "/" },
+	{ "www.apple.com",        "/" },
+	{ "www.facebook.com",     "/" },
+	{ "www.youtube.com",      "/" },
+	{ "www.twitter.com",      "/" },
+	{ "www.linkedin.com",     "/" },
+	{ "www.github.com",       "/" },
+	{ "www.stackoverflow.com","/" },
+	{ "www.reddit.com",       "/" },
+	{ "www.wikipedia.org",    "/" },
+	{ "www.cnn.com",          "/" },
+	{ "www.bbc.com",          "/" },
+	{ "www.yahoo.com",        "/" },
+	{ "www.bing.com",         "/" },
+	{ "www.netflix.com",      "/" },
+	{ "www.adobe.com",        "/" },
+	{ "www.salesforce.com",   "/" },
+	{ "www.oracle.com",       "/" },
+	{ "www.ibm.com",          "/" },
+	{ "www.cisco.com",        "/" },
+	{ "www.intel.com",        "/" },
+	{ "www.hp.com",           "/" },
+	{ "www.dell.com",         "/" },
+	{ "www.ubuntu.com",       "/" },
+	{ "www.mozilla.org",      "/" },
+	{ "www.w3.org",           "/" },
+	{ "httpbin.org",          "/" }
 };
 const int numTargets = sizeof(targets) / sizeof(targets[0]);
 int       currentTargetIndex = 0; // Tracks which target to ping next
@@ -37,7 +63,7 @@ int       currentTargetIndex = 0; // Tracks which target to ping next
 #define PINGING_PIN         11 // This pin pulses HIGH briefly when making a ping request.
 
 // Timing configuration (in milliseconds)
-#define PING_INTERVAL             30000  // How often to attempt a ping: 30 seconds.
+#define PING_INTERVAL             10000  // How often to attempt a ping: 10 seconds.
 #define FAILURE_THRESHOLD         300000 // Mark as failed after 5 minutes of no successful pings.
 #define FAILURE_SIGNAL_DURATION   60000  // How long the failure signal pin stays HIGH: 1 minute.
 #define FAILURE_COOLDOWN_DURATION 300000 // How long to wait after failure before re-triggering.
@@ -110,14 +136,30 @@ void setup() {
 
 	// Start the Ethernet connection, retrying if it fails.
 	Serial.println(F("Initializing Ethernet with DHCP..."));
-	while (Ethernet.begin(mac) == 0) {
-		Serial.println(F("Failed to configure Ethernet using DHCP.  Will retry in 5 seconds."));
+	int dhcpRetries = 0;
+	const int MAX_DHCP_RETRIES = 10; // Prevent infinite loop
+	while (Ethernet.begin(mac) == 0 && dhcpRetries < MAX_DHCP_RETRIES) {
+		dhcpRetries++;
+		Serial.print(F("Failed to configure Ethernet using DHCP. Retry "));
+		Serial.print(dhcpRetries);
+		Serial.print(F("/"));
+		Serial.print(MAX_DHCP_RETRIES);
+		Serial.println(F(" in 5 seconds."));
 		delay(5000);
 	}
-
-	// Print the local IP address obtained from DHCP
-	Serial.print(F("DHCP successful. IP address: "));
-	Serial.println(Ethernet.localIP());
+	
+	if (dhcpRetries >= MAX_DHCP_RETRIES) {
+		Serial.println(F("DHCP failed after maximum retries."));
+		Serial.println(F("ERROR: Cannot obtain network configuration automatically."));
+		Serial.println(F("Please check network connection and DHCP server."));
+		Serial.println(F("System will continue attempting DHCP renewal periodically."));
+		// Continue without network - Ethernet.maintain() will keep trying
+		// The ping process will fail gracefully and keep retrying
+	} else {
+		// Print the local IP address obtained from DHCP
+		Serial.print(F("DHCP successful. IP address: "));
+		Serial.println(Ethernet.localIP());
+	}
 	delay(1000); // Give the shield a second to initialize fully
 
 	// Initialize timers. This correctly handles the startup period.
@@ -163,7 +205,7 @@ void manageSystemState() {
 	switch (currentState) {
 		case STATE_NORMAL:
 			// Check if the failure threshold has been exceeded.
-			if (now - lastSuccessfulConnectionTime >= FAILURE_THRESHOLD) {
+			if (hasTimeElapsed(lastSuccessfulConnectionTime, FAILURE_THRESHOLD)) {
 				// --- Transition to FAILED_SIGNAL state ---
 				currentState = STATE_FAILED_SIGNAL;
 				failureStateStartTime = now;
@@ -180,7 +222,7 @@ void manageSystemState() {
 
 		case STATE_FAILED_SIGNAL:
 			// Check if the failure signal duration has ended.
-			if (now - failureStateStartTime >= FAILURE_SIGNAL_DURATION) {
+			if (hasTimeElapsed(failureStateStartTime, FAILURE_SIGNAL_DURATION)) {
 				// --- Transition to COOLDOWN state ---
 				currentState = STATE_COOLDOWN;
 				cooldownStateStartTime = now;
@@ -197,7 +239,7 @@ void manageSystemState() {
 
 		case STATE_COOLDOWN:
 			// Check if the cooldown period has timed out without a recovery.
-			if (now - cooldownStateStartTime >= FAILURE_COOLDOWN_DURATION) {
+			if (hasTimeElapsed(cooldownStateStartTime, FAILURE_COOLDOWN_DURATION)) {
 				// --- Transition back to NORMAL state to re-evaluate ---
 				currentState = STATE_NORMAL;
 				digitalWrite(FAILURE_STATE_PIN, LOW);
@@ -222,7 +264,7 @@ void managePingProcess() {
 		case PING_IDLE:
 			// In IDLE state, we wait for the ping interval to pass.
 			// We do not ping if the system is in the middle of a hard failure signal.
-			if (currentState != STATE_FAILED_SIGNAL && (now - pingStateStartTime >= PING_INTERVAL)) {
+			if (currentState != STATE_FAILED_SIGNAL && hasTimeElapsed(pingStateStartTime, PING_INTERVAL)) {
 				Serial.println(F("----------------------------------------"));
 				Serial.print(F("Pinging http://"));
 				Serial.print(currentTarget.server);
@@ -249,7 +291,7 @@ void managePingProcess() {
 				pingStateStartTime = now;
 			}
 			// Check for connection timeout.
-			else if (now - pingStateStartTime >= HTTP_TIMEOUT) {
+			else if (hasTimeElapsed(pingStateStartTime, HTTP_TIMEOUT)) {
 				Serial.println(F("-> Failure: Connection attempt timed out."));
 				client.stop();
 				// --- Transition to DONE state ---
@@ -285,7 +327,7 @@ void managePingProcess() {
 				// We check for "HTTP/1.1 2" or "HTTP/1.1 3". This is robust.
 				if (strstr(statusLine, "HTTP/1.1 2") != NULL || strstr(statusLine, "HTTP/1.1 3") != NULL) {
 					// Calculate duration from the start of the entire transaction.
-					handleSuccess(now - pingTransactionStartTime);
+					handleSuccess(safeTimeDiff(now, pingTransactionStartTime));
 				} else {
 					Serial.println(F("-> Failure: Received a non-2xx/3xx status code."));
 				}
@@ -294,7 +336,7 @@ void managePingProcess() {
 				pingStateStartTime = now;
 			}
 			// Check for response timeout.
-			else if (now - pingStateStartTime >= HTTP_TIMEOUT) {
+			else if (hasTimeElapsed(pingStateStartTime, HTTP_TIMEOUT)) {
 				Serial.println(F("-> Failure: HTTP response timeout."));
 				// --- Transition to DONE state ---
 				pingState = PING_DONE;
@@ -318,7 +360,7 @@ void managePingProcess() {
  * @brief Manages the timer for the recovery pulse signal.
  */
 void manageRecoveryPulse() {
-	if (recoveryPulseActive && (millis() - recoveryPulseStartTime >= RECOVERY_PULSE_DURATION)) {
+	if (recoveryPulseActive && hasTimeElapsed(recoveryPulseStartTime, RECOVERY_PULSE_DURATION)) {
 		recoveryPulseActive = false;
 		digitalWrite(RECOVERY_SIGNAL_PIN, LOW);
 		Serial.println(F("-> Recovery pulse finished."));
@@ -329,7 +371,7 @@ void manageRecoveryPulse() {
  * @brief Manages the timer for the pinging pulse signal.
  */
 void managePingingPulse() {
-	if (pingingPulseActive && (millis() - pingingPulseStartTime >= PINGING_PULSE_DURATION)) {
+	if (pingingPulseActive && hasTimeElapsed(pingingPulseStartTime, PINGING_PULSE_DURATION)) {
 		pingingPulseActive = false;
 		digitalWrite(PINGING_PIN, LOW);
 	}
@@ -338,6 +380,33 @@ void managePingingPulse() {
 // =================================================================
 // --- HELPER FUNCTIONS ---
 // =================================================================
+
+/**
+ * @brief Safe time difference calculation that handles millis() overflow.
+ * @param later The later timestamp
+ * @param earlier The earlier timestamp  
+ * @return The time difference in milliseconds
+ */
+unsigned long safeTimeDiff(unsigned long later, unsigned long earlier) {
+	// Unsigned arithmetic automatically handles overflow correctly
+	// This works because of how unsigned integer overflow is defined in C:
+	// When millis() wraps from 4294967295 to 0, the subtraction still works
+	// Example: if earlier=4294967000 and later=1000 (after wrap)
+	// then (unsigned long)(later - earlier) = 1000 - 4294967000 + 2^32 = 2296
+	return later - earlier;
+}
+
+/**
+ * @brief Check if enough time has elapsed, handling millis() overflow.
+ * @param startTime The starting timestamp
+ * @param interval The interval to check
+ * @return true if the interval has elapsed
+ */
+bool hasTimeElapsed(unsigned long startTime, unsigned long interval) {
+	// This pattern is the standard Arduino way to handle millis() overflow
+	// It works because unsigned subtraction handles wrap-around correctly
+	return (millis() - startTime) >= interval;
+}
 
 /**
  * @brief Handles the logic for a successful connection.
@@ -354,7 +423,7 @@ void handleSuccess(unsigned long duration) {
 	// If this success happened while we were in a failure/cooldown cycle, it's a recovery.
 	if (currentState == STATE_FAILED_SIGNAL || currentState == STATE_COOLDOWN) {
 		// Calculate actual outage duration from last successful connection
-		unsigned long outageDuration = now - lastSuccessfulConnectionTime;
+		unsigned long outageDuration = safeTimeDiff(now, lastSuccessfulConnectionTime);
 
 		// --- RECOVERY: Reset all state flags back to normal ---
 		currentState = STATE_NORMAL;

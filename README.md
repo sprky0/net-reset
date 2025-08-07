@@ -123,7 +123,7 @@ Return to Normal evaluation (if timeout without recovery)
 
 ## Network Configuration
 
-The system uses DHCP for automatic network configuration. The MAC address is predefined in the code but should be unique on your local network. You can modify the MAC address in the `mac[]` array if needed.
+The system uses DHCP for automatic network configuration with overflow-safe timer handling that prevents issues when the millis() counter wraps around after approximately 49.7 days of continuous operation. The MAC address is predefined in the code but should be unique on your local network. You can modify the MAC address in the `mac[]` array if needed.
 
 
 ## Installation
